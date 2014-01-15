@@ -3,6 +3,69 @@
 
 #include <stdint.h>
 
+struct aabb {
+	float x0, y0;
+	float x1, y1;
+};
+
+struct solid_op {
+	enum {
+		SOP_FRACTURE
+	} type;
+	union {
+		struct {
+			int foo, bar;
+		} fracture;
+	};
+	struct solid_op* next;
+};
+
+struct solid {
+	float px, py;
+	float vx, vy;
+	float r;
+	float vr;
+
+	float m; // mass
+	// center of mass (x,y) = (zmx/m, zmy/m)? (to make changes easy)
+	float zmx, zmy; // (zmx/m, zmy/m) is center of mass
+	float I; // moment of inertia
+
+	struct aabb aabb;
+
+	// bitmap dimensions
+	int b_width, b_height;
+
+	// bitmap color
+	uint32_t* b_rgba;
+	GLuint gl_rgba;
+
+	// bitmap cell types, 0=unoccupied, 1=particle collision halo, 2=solid type #1, etc?
+	uint8_t* b_type;
+
+	// scratch buffer? make b_type wider (32bit)? could possibly encode a
+	// lot of stuff. though, it probably isn't necessary to pack stuff in a
+	// wide word (if L1/L2 caches are my concern; the CPU can have multiple
+	// memory ranges in cache at the same time)
+
+	// linked list of running operations, e.g. ongoing fractures
+	struct solid_op* ops;
+
+	uint32_t dirty_flags;
+
+
+	// derived values
+	float inv_m; // inverse mass
+	float inv_I; // inverse moment of inertia;
+	float cx, cy; // center of mass
+	float tx_x0, tx_y0, tx_u, tx_v; // transform
+
+
+	// next solid in linked list?
+	struct solid* next;
+};
+
+
 struct ppair {
 	int i, j;
 };
@@ -42,6 +105,8 @@ struct psys {
 
 	int ppair_count;
 	struct ppair* ppairs;
+
+	struct solid* solids;
 };
 
 void psys_init(struct psys* ps);

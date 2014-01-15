@@ -62,6 +62,7 @@ int main(int argc, char** argv)
 	glViewport(0, 0, width, height);
 	printf("window: %dx%d\n", width, height);
 
+	glMatrixMode(GL_PROJECTION);
 	glOrtho(-width/2, width/2, height/2, -height/2, 1, 0);
 	glDisable(GL_DEPTH_TEST);
 	glShadeModel(GL_SMOOTH);
@@ -69,8 +70,8 @@ int main(int argc, char** argv)
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glPointSize(2.0f);
 
-	struct psys ps;
-	psys_init(&ps);
+	struct psys psys;
+	psys_init(&psys);
 
 	int exiting = 0;
 	for(;;) {
@@ -85,13 +86,12 @@ int main(int argc, char** argv)
 
 		if(exiting) break;
 
-		psys_step(&ps);
+		psys_step(&psys);
 
 		glClearColor(0, 0.05, 0.1, 1);
 		glClear(GL_COLOR_BUFFER_BIT);
 
-		glColor4f(1,1,1,1);
-		psys_draw(&ps);
+		psys_draw(&psys);
 
 		SDL_GL_SwapWindow(w);
 	}

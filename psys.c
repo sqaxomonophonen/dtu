@@ -7,6 +7,15 @@
 #include <glew.h>
 
 #include "psys.h"
+#include "mud.h"
+
+#define DEG2RAD(x) ((x) * (1.0 / 180.0 * M_PI))
+
+#define SOLID_DIRTY_RGBA (1<<0)
+#define SOLID_DIRTY_MASS (1<<1)
+
+#define SOLID_DIRTY_ALL (SOLID_DIRTY_RGBA | SOLID_DIRTY_MASS)
+
 
 // XXX if drifting occurs, perhaps try fiddle with PARTICLE_R where interaction
 // is calculated.. it might be that the cells slightly truncate the potential
@@ -14,6 +23,326 @@
 #define PARTICLE_R (20.0f)
 #define PARTICLE_R_SQR (PARTICLE_R*PARTICLE_R)
 #define MASS (1.2f)
+
+
+
+static float dot2d(float ax, float ay, float bx, float by)
+{
+	return ax*bx + ay*by;
+}
+
+static float cross2d(float ax, float ay, float bx, float by)
+{
+	return ax*by - ay*bx;
+}
+
+
+
+static float solid_mass_at_point(struct solid* solid, int x, int y)
+{
+	uint8_t type = *(solid->b_type + x + y * solid->b_width);
+	switch(type) {
+		case 1: return 0.01f;
+		default: return 0;
+	}
+}
+
+static void solid_update_transform(struct solid* solid)
+{
+	float s = sinf(DEG2RAD(solid->r));
+	float c = cosf(DEG2RAD(solid->r));
+
+	float zx = solid->cx * c - solid->cy * s;
+	float zy = solid->cx * s + solid->cy * c;
+
+	solid->tx_x0 = solid->px - zx + solid->cx;
+	solid->tx_y0 = solid->py - zy + solid->cy;
+
+	solid->tx_u = c;
+	solid->tx_v = s;
+
+	// TODO update AABB?
+}
+
+/*
+static void solid_tx_world_to_local_f(struct solid* solid, float wx, float wy, float* lx, float* ly)
+{
+	float x0 = wx - solid->tx_x0;
+	float y0 = wy - solid->tx_y0;
+	*lx = dot2d(solid->tx_u, solid->tx_v, x0, y0);
+	*ly = cross2d(solid->tx_u, solid->tx_v, x0, y0);
+}
+
+static void solid_tx_world_to_local_i(struct solid* solid, float wx, float wy, int* lx, int* ly)
+{
+	float lxf;
+	float lyf;
+	solid_tx_world_to_local_f(solid, wx, wy, &lxf, &lyf);
+	// XXX +0.5f?
+	// XXX truncate problem around 0
+	*lx = (int)lxf;
+	*ly = (int)lyf;
+}
+*/
+
+/*
+static int solid_world_point_inside(struct solid* solid, float wx, float wy)
+{
+	float lx, ly;
+	solid_tx_world_to_local_f(solid, wx, wy, &lx, &ly);
+	if(lx < 0) return 0;
+	if(ly < 0) return 0;
+	if(lx >= solid->b_width) return 0;
+	if(ly >= solid->b_height) return 0;
+	return 1;
+}
+*/
+
+static int solid_particle_impulse_response(struct solid* solid, struct particle* particle)
+{
+	// transform world to local
+	float x0 = particle->px - solid->tx_x0;
+	float y0 = particle->py - solid->tx_y0;
+	float lx = dot2d(solid->tx_u, solid->tx_v, x0, y0);
+	float ly = cross2d(solid->tx_u, solid->tx_v, x0, y0);
+	int lxi = (int)lx;
+	int lyi = (int)ly;
+
+	// check rect
+	if(lxi < 0) return 0;
+	if(lyi < 0) return 0;
+	if(lxi >= solid->b_width) return 0;
+	if(lyi >= solid->b_height) return 0;
+
+	// check type cell
+	uint8_t t = *(solid->b_type + lxi + lyi * solid->b_width);
+	if(t == 0) return 0;
+
+	// collision! apply impulse response
+
+	// calculate solid velocity at impact point
+	float dx = lx - solid->cx;
+	float dy = ly - solid->cy;
+	float rvr = DEG2RAD(solid->vr);
+	float lrvx = -dy * rvr;
+	float lrvy = dx * rvr;
+	float wrvx = lrvx * solid->tx_u + lrvy * solid->tx_v;
+	float wrvy = lrvy * solid->tx_u - lrvx * solid->tx_v;
+	float ivx = solid->vx + wrvx;
+	float ivy = solid->vy + wrvy;
+
+	// calculate relative impulse
+	float in_impx = (particle->vx - ivx) * MASS;
+	float in_impy = (particle->vy - ivy) * MASS;
+
+	// apply linear impulse
+	float dvx = in_impx * solid->inv_m;
+	float dvy = in_impy * solid->inv_m;
+	solid->vx += dvx;
+	solid->vy += dvy;
+
+	// apply particle impulse (XXX this is wrong?)
+	particle->vx -= dvx;
+	particle->vy -= dvy;
+
+	// calculate rotated impulse
+	float rin_impx = in_impx * solid->tx_u - in_impy * solid->tx_v;
+	float rin_impy = in_impx * solid->tx_v + in_impy * solid->tx_u;
+
+	// apply angular impulse
+	float rimp = cross2d(dx, dy, rin_impx, rin_impy) * solid->inv_I;
+	solid->vr += rimp;
+
+	return 1;
+}
+
+
+static void solid_update_dirty(struct solid* solid)
+{
+	// TODO reupload textures to opengl? (add some dirty-flags maybe)
+	// TODO update AABB?
+
+	if(solid->dirty_flags == 0) return;
+
+	if(solid->dirty_flags & SOLID_DIRTY_RGBA) {
+		if(solid->gl_rgba != 0) {
+		}
+		glGenTextures(1, &solid->gl_rgba);
+		glBindTexture(GL_TEXTURE_2D, solid->gl_rgba);
+		glTexImage2D(
+			GL_TEXTURE_2D,
+			0, // levels
+			4, // bytes per texel
+			solid->b_width,
+			solid->b_height,
+			0,
+			GL_RGBA,
+			GL_UNSIGNED_BYTE,
+			solid->b_rgba);
+		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		solid->dirty_flags &= ~SOLID_DIRTY_RGBA;
+	}
+
+	if(solid->dirty_flags & SOLID_DIRTY_MASS) {
+		float zmx = 0;
+		float zmy = 0;
+		float mass = 0;
+		for(int y = 0; y < solid->b_height; y++) {
+			for(int x = 0; x < solid->b_width; x++) {
+				float pm = solid_mass_at_point(solid, x, y);
+				mass += pm;
+				zmx += pm * ((float)x + 0.5f);
+				zmy += pm * ((float)y + 0.5f);
+			}
+		}
+		solid->m = mass;
+		solid->inv_m = 1.0f / mass;
+		solid->zmx = zmx;
+		solid->zmy = zmy;
+		solid->cx = zmx / mass;
+		solid->cy = zmy / mass;
+
+		float I = 0;
+		for(int y = 0; y < solid->b_height; y++) {
+			for(int x = 0; x < solid->b_width; x++) {
+				float pm = solid_mass_at_point(solid, x, y);
+				if(pm > 0.0f) {
+					float rx = ((float)x + 0.5f) - solid->cx;
+					float ry = ((float)y + 0.5f) - solid->cy;
+					float r2 = rx*rx + ry*ry;
+					I += pm * r2;
+				}
+			}
+		}
+		solid->I = I;
+		solid->inv_I = 1.0f / I;
+
+		solid->dirty_flags &= ~SOLID_DIRTY_MASS;
+	}
+}
+
+/*
+struct solid* solid_new(int width, int height)
+{
+	struct solid* solid = malloc(sizeof(struct solid));
+	bzero(solid, sizeof(struct solid));
+	solid->b_width = width;
+	solid->b_height = height;
+
+	int n = width * height;
+	solid->b_rgba = malloc(n * sizeof(uint32_t));
+	solid->b_type = malloc(n * sizeof(uint8_t));
+
+	return solid;
+}
+*/
+
+struct solid* solid_load(const char* id)
+{
+	struct solid* solid = malloc(sizeof(struct solid));
+	bzero(solid, sizeof(struct solid));
+
+	mud_load_png_rgba(id, (void**) &solid->b_rgba, &solid->b_width, &solid->b_height);
+
+	int n = solid->b_width * solid->b_height;
+
+	solid->b_type = (uint8_t*)malloc(n);
+
+	for(int i = 0; i < n; i++) {
+		uint32_t* tx = solid->b_rgba + i;
+		uint8_t alpha = ((*tx)>>24) & 0xff;
+		uint8_t* t = solid->b_type + i;
+		(*t) = alpha == 0xff ? 1 : 0;
+
+	}
+
+	solid->dirty_flags = SOLID_DIRTY_ALL;
+	solid_update_dirty(solid);
+	solid_update_transform(solid);
+
+	// XXX DEBUG
+	solid->py = -500;
+	solid->vx = -0.2f;
+	solid->vy = -0.33f;
+	solid->vr = 0.2f;
+
+	return solid;
+}
+
+/*
+void solid_destroy(struct solid* solid)
+{
+	free(solid->b_type);
+	free(solid->b_rgba);
+	free(solid);
+}
+*/
+
+
+
+static void solid_step(struct solid* solid)
+{
+	solid->px += solid->vx;
+	solid->py += solid->vy;
+	solid->r += solid->vr;
+	solid_update_transform(solid);
+
+	// gravity
+	solid->vy += 0.001f;
+}
+
+
+static void solid_draw(struct solid* solid)
+{
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+
+	glTranslatef(solid->px + solid->cx, solid->py + solid->cy, 0);
+	glRotatef(solid->r, 0, 0, 1);
+	glTranslatef(-solid->cx, -solid->cy, 0);
+
+	glColor4f(1,1,1,1);
+	glBindTexture(GL_TEXTURE_2D, solid->gl_rgba);
+	glBegin(GL_QUADS);
+	glVertex2f(0, 0);
+	glTexCoord2f(0, 0);
+	glVertex2f(solid->b_width, 0);
+	glTexCoord2f(1, 0);
+	glVertex2f(solid->b_width, solid->b_height);
+	glTexCoord2f(1, 1);
+	glVertex2f(0, solid->b_height);
+	glTexCoord2f(0, 1);
+	glEnd();
+
+	// DEBUG: draw transform
+	/*
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glColor4f(1,0,1.0,1.0);
+	glDisable(GL_TEXTURE_2D);
+
+	float x0 = solid->tx_x0;
+	float y0 = solid->tx_y0;
+
+	float ax = solid->tx_u * solid->b_width;
+	float ay = solid->tx_v * solid->b_width;
+
+	float bx = -solid->tx_v * solid->b_height;
+	float by = solid->tx_u * solid->b_height;
+
+	glBegin(GL_LINE_LOOP);
+	glVertex2f(x0, y0);
+	glVertex2f(x0 + ax, y0 + ay);
+	glVertex2f(x0 + ax + bx, y0 + ay + by);
+	glVertex2f(x0 + bx, y0 + by);
+	glEnd();
+	*/
+
+}
+
+
+
 
 static float frand(float min, float max)
 {
@@ -166,6 +495,8 @@ void psys_init(struct psys* ps)
 
 	// XXX?
 	//qsort(ps->occupied_buckets, ps->occupied_buckets_count, sizeof(int), occupied_buckets_index_compare);
+
+	ps->solids = solid_load("thing.png");
 }
 
 
@@ -196,6 +527,8 @@ void psys_step(struct psys* ps)
 							// calculate density
 							float c = (PARTICLE_R_SQR - dsqr) * (1.0f / PARTICLE_R_SQR);
 							float d = c*c*c;
+							//float d = c*c; // works too
+							//float d = c*c*c*c; // and this
 							p->density += d * MASS;
 							op->density += d * MASS;
 
@@ -271,11 +604,18 @@ void psys_step(struct psys* ps)
 		if(p->px < -1920/2 || p->px > 1920/2) p->vx = -p->vx * 0.5f;
 		if(p->py < -1080/2 || p->py > 1080/2) p->vy = -p->vy * 0.5f;
 
-		p->vxe = (2.0f * p->vx + p->vxe) * 0.5f; // XXX not completely right is it?
+		p->vxe = (2.0f * p->vx + p->vxe) * 0.5f; // XXX not completely right is it? (but it works!)
 		p->vye = (2.0f * p->vy + p->vye) * 0.5f;
 
 		p->px += p->vx;
 		p->py += p->vy;
+
+		struct solid* solid = ps->solids;
+		while(solid) {
+			solid_particle_impulse_response(solid, p);
+			solid = solid->next;
+		}
+
 		psys_insert_particle(ps, p);
 	}
 
@@ -283,11 +623,22 @@ void psys_step(struct psys* ps)
 	// do a cell_key compare too?
 	qsort(ps->occupied_buckets, ps->occupied_buckets_count, sizeof(int), occupied_buckets_index_compare);
 
+	struct solid* solid = ps->solids;
+	while(solid) {
+		solid_step(solid);
+		solid = solid->next;
+	}
+
 	printf("collisions: %d\n", ps->collisions);
 }
 
 void psys_draw(struct psys* ps)
 {
+	glColor4f(1,1,1,1);
+	glDisable(GL_TEXTURE_2D);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+
 	struct particle_hash* ph = &ps->hashes[ps->current_hash_index];
 	glBegin(GL_POINTS);
 	for(int i = 0; i < ps->occupied_buckets_count; i++) {
@@ -295,6 +646,12 @@ void psys_draw(struct psys* ps)
 		glVertex2f(p->px, p->py);
 	}
 	glEnd();
-}
 
+	glEnable(GL_TEXTURE_2D);
+	struct solid* solid = ps->solids;
+	while(solid) {
+		solid_draw(solid);
+		solid = solid->next;
+	}
+}
 
