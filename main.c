@@ -74,6 +74,14 @@ int main(int argc, char** argv)
 	psys_init(&psys);
 
 	int exiting = 0;
+
+	float wmx = 0;
+	float wmy = 0;
+
+	psys_step(&psys); // kickstart
+
+	int simulation_running = 1;
+
 	for(;;) {
 		SDL_Event e;
 		while(SDL_PollEvent(&e)) {
@@ -81,17 +89,44 @@ int main(int argc, char** argv)
 				if(e.key.keysym.sym == SDLK_ESCAPE) {
 					exiting = 1;
 				}
+				if(e.key.keysym.sym == SDLK_SPACE) {
+					simulation_running ^= 1;
+				}
+			}
+			if(e.type == SDL_MOUSEMOTION) {
+				wmx = e.motion.x - width/2;
+				wmy = e.motion.y - height/2;
 			}
 		}
 
 		if(exiting) break;
 
-		psys_step(&psys);
+		if(simulation_running) {
+			psys_step(&psys);
+		}
 
 		glClearColor(0, 0.05, 0.1, 1);
 		glClear(GL_COLOR_BUFFER_BIT);
 
 		psys_draw(&psys);
+
+		struct solid* solid = psys.solids;
+		while(solid) {
+			float nx, ny;
+			if(solid_normal_at_world_point(solid, wmx, wmy, &nx, &ny)) {
+				glColor4f(1,1,0,1);
+			} else {
+				glColor4f(1,0,0,1);
+			}
+			glDisable(GL_TEXTURE_2D);
+			glMatrixMode(GL_MODELVIEW);
+			glLoadIdentity();
+			glBegin(GL_LINES);
+			glVertex2f(wmx, wmy);
+			glVertex2f(wmx + nx * 150, wmy + ny * 150);
+			glEnd();
+			solid = solid->next;
+		}
 
 		SDL_GL_SwapWindow(w);
 	}

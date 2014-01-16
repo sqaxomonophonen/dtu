@@ -98,8 +98,90 @@ static int solid_world_point_inside(struct solid* solid, float wx, float wy)
 }
 */
 
+static int clamp_int(int i, int min, int max)
+{
+	if(i < min) return min;
+	if(i > max) return max;
+	return i;
+}
+
+static int solid_normal_at_local_point(struct solid* solid, int px, int py, float* nx, float* ny)
+{
+	const int r = 4;
+	int x0 = clamp_int(px - r, 0, solid->b_width - 1);
+	int y0 = clamp_int(py - r, 0, solid->b_height - 1);
+	int x1 = clamp_int(px + r, 0, solid->b_width - 1);
+	int y1 = clamp_int(py + r, 0, solid->b_height - 1);
+
+	int sx = 0;
+	int sy = 0;
+
+	uint8_t* t = solid->b_type + x0 + y0 * solid->b_width;
+	int j = solid->b_width - (x1 - x0 + 1);
+	for(int y = y0; y <= y1; y++) {
+		for(int x = x0; x <= x1; x++) {
+			uint8_t* t = solid->b_type + x + y * solid->b_width;
+			if((*t) != 0) {
+				sx += (x-px);
+				sy += (y-py);
+			}
+			t++;
+		}
+		t += j;
+	}
+
+	if(sx == 0 && sy == 0) {
+		// no normal; this is as good as any?
+		*nx = 1.0;
+		*ny = 0.0;
+		return 0;
+	} else {
+		float nnx = -sx;
+		float nny = -sy;
+		float d = 1.0f / sqrtf(nnx*nnx + nny*nny);
+		nnx *= d;
+		nny *= d;
+		*nx = nnx;
+		*ny = nny;
+		return 1;
+	}
+}
+
+/*
+void solid_draw(struct solid* solid, int x, int y)
+{
+	if(x < 0 || y < 0 || x >= solid->b_width || y >= solid->b_height) return;
+	uint8_t* t = solid->
+}
+*/
+
+int solid_normal_at_world_point(struct solid* solid, float px, float py, float* nx, float* ny)
+{
+	// transform world to local
+	float x0 = px - solid->tx_x0;
+	float y0 = py - solid->tx_y0;
+	float lx = dot2d(solid->tx_u, solid->tx_v, x0, y0);
+	float ly = cross2d(solid->tx_u, solid->tx_v, x0, y0);
+	int lxi = (int)lx;
+	int lyi = (int)ly;
+
+	//solid_draw(solid, lxi, lyi);
+	float nnx, nny;
+
+	// find normal
+	int res = solid_normal_at_local_point(solid, lxi, lyi, &nnx, &nny);
+
+	// rotate back to world orientation
+	(*nx) = nnx * solid->tx_u - nny * solid->tx_v;
+	(*ny) = nnx * solid->tx_v + nny * solid->tx_u;
+
+	return res;
+}
+
 static int solid_particle_impulse_response(struct solid* solid, struct particle* particle)
 {
+	// TODO AABB test
+
 	// transform world to local
 	float x0 = particle->px - solid->tx_x0;
 	float y0 = particle->py - solid->tx_y0;
@@ -135,23 +217,25 @@ static int solid_particle_impulse_response(struct solid* solid, struct particle*
 	float in_impx = (particle->vx - ivx) * MASS;
 	float in_impy = (particle->vy - ivy) * MASS;
 
-	// apply linear impulse
-	float dvx = in_impx * solid->inv_m;
-	float dvy = in_impy * solid->inv_m;
-	solid->vx += dvx;
-	solid->vy += dvy;
+	// add linear force
+	solid->fx += in_impx;
+	solid->fy += in_impy;
 
 	// apply particle impulse (XXX this is wrong?)
-	particle->vx -= dvx;
-	particle->vy -= dvy;
+	//particle->vx -= dvx;
+	//particle->vy -= dvy;
 
 	// calculate rotated impulse
 	float rin_impx = in_impx * solid->tx_u - in_impy * solid->tx_v;
 	float rin_impy = in_impx * solid->tx_v + in_impy * solid->tx_u;
 
+	// add torque
+	solid->fvr += cross2d(dx, dy, rin_impx, rin_impy);
+
 	// apply angular impulse
-	float rimp = cross2d(dx, dy, rin_impx, rin_impy) * solid->inv_I;
-	solid->vr += rimp;
+	// XXX this is still wrong
+	//float rimp = cross2d(dx, dy, rin_impx, rin_impy) * solid->inv_I;
+	//solid->vr += rimp;
 
 	return 1;
 }
@@ -265,7 +349,7 @@ struct solid* solid_load(const char* id)
 	solid->py = -500;
 	solid->vx = -0.2f;
 	solid->vy = -0.33f;
-	solid->vr = 0.2f;
+	solid->vr = 9.2f;
 
 	return solid;
 }
@@ -283,9 +367,17 @@ void solid_destroy(struct solid* solid)
 
 static void solid_step(struct solid* solid)
 {
+	solid->vx += solid->fx * solid->inv_m;
+	solid->vy += solid->fy * solid->inv_m;
+	solid->fx = 0.0f;
+	solid->fy = 0.0f;
 	solid->px += solid->vx;
 	solid->py += solid->vy;
+
+	solid->vr += solid->fvr * solid->inv_I;
 	solid->r += solid->vr;
+	solid->fvr = 0.0f;
+
 	solid_update_transform(solid);
 
 	// gravity
@@ -305,18 +397,17 @@ static void solid_draw(struct solid* solid)
 	glColor4f(1,1,1,1);
 	glBindTexture(GL_TEXTURE_2D, solid->gl_rgba);
 	glBegin(GL_QUADS);
-	glVertex2f(0, 0);
 	glTexCoord2f(0, 0);
-	glVertex2f(solid->b_width, 0);
+	glVertex2f(0, 0);
 	glTexCoord2f(1, 0);
-	glVertex2f(solid->b_width, solid->b_height);
+	glVertex2f(solid->b_width, 0);
 	glTexCoord2f(1, 1);
-	glVertex2f(0, solid->b_height);
+	glVertex2f(solid->b_width, solid->b_height);
 	glTexCoord2f(0, 1);
+	glVertex2f(0, solid->b_height);
 	glEnd();
 
 	// DEBUG: draw transform
-	/*
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 	glColor4f(1,0,1.0,1.0);
@@ -337,8 +428,6 @@ static void solid_draw(struct solid* solid)
 	glVertex2f(x0 + ax + bx, y0 + ay + by);
 	glVertex2f(x0 + bx, y0 + by);
 	glEnd();
-	*/
-
 }
 
 

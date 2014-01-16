@@ -21,10 +21,12 @@ struct solid_op {
 };
 
 struct solid {
-	float px, py;
-	float vx, vy;
-	float r;
-	float vr;
+	float px, py; // position
+	float vx, vy; // velocity
+	float fx, fy; // forces
+	float r; // rotation
+	float vr; // rotational velocity
+	float fvr; // torque
 
 	float m; // mass
 	// center of mass (x,y) = (zmx/m, zmy/m)? (to make changes easy)
@@ -112,5 +114,8 @@ struct psys {
 void psys_init(struct psys* ps);
 void psys_step(struct psys* ps);
 void psys_draw(struct psys* ps);
+
+
+int solid_normal_at_world_point(struct solid* solid, float px, float py, float* nx, float* ny);
 
 #endif//__PSYS_H__
