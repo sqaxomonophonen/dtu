@@ -22,7 +22,7 @@
 // number of interactive particles
 #define PARTICLE_R (20.0f)
 #define PARTICLE_R_SQR (PARTICLE_R*PARTICLE_R)
-#define MASS (1.2f)
+#define PARTICLE_MASS (1.2f)
 
 
 
@@ -31,18 +31,29 @@ static float dot2d(float ax, float ay, float bx, float by)
 	return ax*bx + ay*by;
 }
 
+/*
 static float cross2d(float ax, float ay, float bx, float by)
 {
 	return ax*by - ay*bx;
 }
+*/
 
+
+static uint8_t solid_type_at_point(struct solid* solid, int x, int y)
+{
+	if(x < 0 || y < 0 || x >= solid->b_width || y >= solid->b_height) {
+		return 0;
+	} else {
+		return *(solid->b_type + x + y * solid->b_width);
+	}
+}
 
 
 static float solid_mass_at_point(struct solid* solid, int x, int y)
 {
-	uint8_t type = *(solid->b_type + x + y * solid->b_width);
+	uint8_t type = solid_type_at_point(solid, x, y);
 	switch(type) {
-		case 1: return 0.01f;
+		case 1: return 0.03f;
 		default: return 0;
 	}
 }
@@ -58,11 +69,14 @@ static void solid_update_transform(struct solid* solid)
 	solid->tx_x0 = solid->px - zx + solid->cx;
 	solid->tx_y0 = solid->py - zy + solid->cy;
 
+	//printf("uptx: %f, %f\n", solid->tx_x0, solid->tx_y0);
+
 	solid->tx_u = c;
 	solid->tx_v = s;
 
 	// TODO update AABB?
 }
+
 
 /*
 static void solid_tx_world_to_local_f(struct solid* solid, float wx, float wy, float* lx, float* ly)
@@ -131,30 +145,17 @@ static int solid_normal_at_local_point(struct solid* solid, int px, int py, floa
 	}
 
 	if(sx == 0 && sy == 0) {
-		// no normal; this is as good as any?
-		*nx = 1.0;
+		*nx = 0.0;
 		*ny = 0.0;
 		return 0;
 	} else {
-		float nnx = -sx;
-		float nny = -sy;
-		float d = 1.0f / sqrtf(nnx*nnx + nny*nny);
-		nnx *= d;
-		nny *= d;
-		*nx = nnx;
-		*ny = nny;
+		*nx = -sx;
+		*ny = -sy;
 		return 1;
 	}
 }
 
 /*
-void solid_draw(struct solid* solid, int x, int y)
-{
-	if(x < 0 || y < 0 || x >= solid->b_width || y >= solid->b_height) return;
-	uint8_t* t = solid->
-}
-*/
-
 int solid_normal_at_world_point(struct solid* solid, float px, float py, float* nx, float* ny)
 {
 	// transform world to local
@@ -177,16 +178,101 @@ int solid_normal_at_world_point(struct solid* solid, float px, float py, float* 
 
 	return res;
 }
+*/
+
+static void tx_vector(float c, float s, float* u, float* v)
+{
+	float u0 = *u;
+	float v0 = *v;
+	float u1 = u0 * c - v0 * s;
+	float v1 = u0 * s + v0 * c;
+	*u = u1;
+	*v = v1;
+}
+
+static void solid_tx_vector_local_to_world(struct solid* solid, float* u, float* v)
+{
+	tx_vector(solid->tx_u, solid->tx_v, u, v);
+}
+
+static void solid_tx_vector_world_to_local(struct solid* solid, float* u, float* v)
+{
+	tx_vector(solid->tx_u, -solid->tx_v, u, v);
+}
+
+static int solid_bresenham_search_for_escape(struct solid* solid, float x0, float y0, float dx, float dy, float* x1, float* y1)
+{
+	// XXX hmm use ints and *x1 = x0 + x_travelled
+
+	if(dx == 0.0f && dy == 0.0f) {
+		*x1 = x0;
+		*y1 = y0;
+		return 0;
+	}
+
+	float e = 0.0f;
+	int n = 0;
+	float x = x0;
+	float y = y0;
+
+	int xward = dx > dy;
+
+	float de = xward ? (dy/dx) : (dx/dy);
+
+	float ax = dx > 0.0f ? 1.0f : -1.0f;
+	float ay = dy > 0.0f ? 1.0f : -1.0f;
+
+	for(;;) {
+		int ix = x;
+		int iy = y;
+		uint8_t t = solid_type_at_point(solid, ix, iy);
+		if(t == 0) {
+			*x1 = x;
+			*y1 = y;
+			return n;
+		}
+
+		e += de;
+		if(e >= 0.5f) {
+			if(xward) {
+				y += ay;
+			} else {
+				x += ax;
+			}
+			e -= 1.0f;
+		}
+		if(xward) {
+			x += ax;
+		} else {
+			y += ay;
+		}
+
+		n++;
+	}
+}
+
+static void solid_tx_point_world_to_local(struct solid* solid, float* x, float* y)
+{
+	float lx = (*x) - solid->tx_x0;
+	float ly = (*y) - solid->tx_y0;
+	*x = dot2d(solid->tx_u, solid->tx_v, lx, ly);
+	*y = dot2d(-solid->tx_v, solid->tx_u, lx, ly);
+}
+
+static void solid_tx_point_local_to_world(struct solid* solid, float* x, float* y)
+{
+	solid_tx_vector_local_to_world(solid, x, y);
+	(*x) += solid->tx_x0;
+	(*y) += solid->tx_y0;
+}
 
 static int solid_particle_impulse_response(struct solid* solid, struct particle* particle)
 {
 	// TODO AABB test
 
-	// transform world to local
-	float x0 = particle->px - solid->tx_x0;
-	float y0 = particle->py - solid->tx_y0;
-	float lx = dot2d(solid->tx_u, solid->tx_v, x0, y0);
-	float ly = cross2d(solid->tx_u, solid->tx_v, x0, y0);
+	float lx = particle->px;
+	float ly = particle->py;
+	solid_tx_point_world_to_local(solid, &lx, &ly);
 	int lxi = (int)lx;
 	int lyi = (int)ly;
 
@@ -197,45 +283,78 @@ static int solid_particle_impulse_response(struct solid* solid, struct particle*
 	if(lyi >= solid->b_height) return 0;
 
 	// check type cell
-	uint8_t t = *(solid->b_type + lxi + lyi * solid->b_width);
+	uint8_t t = solid_type_at_point(solid, lxi, lyi);
 	if(t == 0) return 0;
 
-	// collision! apply impulse response
+	// ok, collision!
 
-	// calculate solid velocity at impact point
+	///////////////////////////////////////////////////////
+	// calculate impact velocity vector in respect to solid
+
+	// particle velocity in respect to solid
+	float pvx = particle->vx;
+	float pvy = particle->vy;
+	solid_tx_vector_world_to_local(solid, &pvx, &pvy);
+
+	// solid linear velocity in respect to itself (its vx/vy are world
+	// velocities)
+	float svx = solid->vx;
+	float svy = solid->vy;
+	solid_tx_vector_world_to_local(solid, &svx, &svy);
+
+	// solid rotational velocity at impact point in respect to itself
 	float dx = lx - solid->cx;
 	float dy = ly - solid->cy;
 	float rvr = DEG2RAD(solid->vr);
-	float lrvx = -dy * rvr;
-	float lrvy = dx * rvr;
-	float wrvx = lrvx * solid->tx_u + lrvy * solid->tx_v;
-	float wrvy = lrvy * solid->tx_u - lrvx * solid->tx_v;
-	float ivx = solid->vx + wrvx;
-	float ivy = solid->vy + wrvy;
+	float rvx = -dy * rvr;
+	float rvy = dx * rvr;
 
-	// calculate relative impulse
-	float in_impx = (particle->vx - ivx) * MASS;
-	float in_impy = (particle->vy - ivy) * MASS;
+	// impact velocity in respect to solid
+	float ivx = pvx - (svx + rvx);
+	float ivy = pvy - (svy + rvy);
 
-	// add linear force
-	solid->fx += in_impx;
-	solid->fy += in_impy;
+	///////////////////////////////////////////////////////
 
-	// apply particle impulse (XXX this is wrong?)
-	//particle->vx -= dvx;
-	//particle->vy -= dvy;
+	// estimate impact point _outside_ solid by walking in opposite
+	// direction of impact velocity vector
+	float px, py;
+	solid_bresenham_search_for_escape(solid, lx, ly, -ivx, -ivy, &px, &py);
 
-	// calculate rotated impulse
-	float rin_impx = in_impx * solid->tx_u - in_impy * solid->tx_v;
-	float rin_impy = in_impx * solid->tx_v + in_impy * solid->tx_u;
+	// sample a surface normal
+	float nx;
+	float ny;
+	int found_normal = solid_normal_at_local_point(solid, (int)px, (int)py, &nx, &ny);
 
-	// add torque
-	solid->fvr += cross2d(dx, dy, rin_impx, rin_impy);
+	float vn = dot2d(ivx, ivy, nx, ny);
 
-	// apply angular impulse
-	// XXX this is still wrong
-	//float rimp = cross2d(dx, dy, rin_impx, rin_impy) * solid->inv_I;
-	//solid->vr += rimp;
+	//printf("DEBUG found_normal = %d at (%d,%d) / vn = %f\n", found_normal, (int)px, (int)py, vn);
+
+	// if a normal was found and impact velocity vector point towards the
+	// surface, then we have a "valid impact" and can calculate impulse
+	if(found_normal && vn < 0) {
+		float nn = nx*nx + ny*ny;
+		float m1 = solid->inv_m + (1.0f / PARTICLE_MASS);
+		float rn = dot2d(-dy, dx, nx, ny);
+		float rnI = rn * rn * solid->inv_I;
+		float j = (-2.0f*vn) / (nn * m1 + rnI);
+
+		// apply torque
+		solid->fvr -= rn * j; // XXX is this right?
+		printf("%f\n", solid->fvr);
+
+		// linear impulse in respect to world...
+		solid_tx_vector_local_to_world(solid, &nx, &ny);
+		solid->fx -= nx * j;
+		solid->fy -= ny * j;
+
+		particle->vx += nx * j * (1.0 / PARTICLE_MASS);
+		particle->vy += ny * j * (1.0 / PARTICLE_MASS);
+
+	}
+
+	solid_tx_point_local_to_world(solid, &px, &py);
+	particle->px = px;
+	particle->py = py;
 
 	return 1;
 }
@@ -341,15 +460,17 @@ struct solid* solid_load(const char* id)
 
 	}
 
-	solid->dirty_flags = SOLID_DIRTY_ALL;
-	solid_update_dirty(solid);
-	solid_update_transform(solid);
 
 	// XXX DEBUG
 	solid->py = -500;
+	solid->r = 90;
 	solid->vx = -0.2f;
-	solid->vy = -0.33f;
-	solid->vr = 9.2f;
+	solid->vy = 0.13f;
+	solid->vr = -0.1f;
+
+	solid->dirty_flags = SOLID_DIRTY_ALL;
+	solid_update_dirty(solid);
+	solid_update_transform(solid);
 
 	return solid;
 }
@@ -538,7 +659,7 @@ static void psys_insert_particle(struct psys* ps, struct particle* p)
 	struct particle* destp = &ph->buckets[bucket_index].particle;
 	memcpy(destp, p, sizeof(struct particle));
 	particle_update_cell_key(destp);
-	destp->density = MASS;
+	destp->density = PARTICLE_MASS;
 
 	ps->occupied_buckets[ps->occupied_buckets_count++] = bucket_index;
 	root_bucket->insert_offset = insert_offset;
@@ -576,7 +697,7 @@ void psys_init(struct psys* ps)
 
 	for(int i = 0; i < N; i++) {
 		p.px = frand(-500, 500);
-		p.py = frand(-500, 500);
+		p.py = frand(0, 500);
 		//p.vx = frand(-1, 1);
 		//p.vy = frand(-1, 1);
 		psys_insert_particle(ps, &p);
@@ -618,8 +739,8 @@ void psys_step(struct psys* ps)
 							float d = c*c*c;
 							//float d = c*c; // works too
 							//float d = c*c*c*c; // and this
-							p->density += d * MASS;
-							op->density += d * MASS;
+							p->density += d * PARTICLE_MASS;
+							op->density += d * PARTICLE_MASS;
 
 							// add particle pair
 							struct ppair* ppair = &ps->ppairs[ps->ppair_count++];
@@ -633,7 +754,7 @@ void psys_step(struct psys* ps)
 		}
 	}
 
-	printf("ppair_count: %d\n", ps->ppair_count);
+	//printf("ppair_count: %d\n", ps->ppair_count);
 
 	// calculate forces
 	for(int i = 0; i < ps->ppair_count; i++) {
@@ -664,7 +785,7 @@ void psys_step(struct psys* ps)
 		// from each other. opposite holds too; negative pressure
 		// attracts particles
 
-		float m1 = 1.0f / MASS;
+		float m1 = 1.0f / PARTICLE_MASS;
 		fx *= m1;
 		fy *= m1;
 
@@ -718,7 +839,7 @@ void psys_step(struct psys* ps)
 		solid = solid->next;
 	}
 
-	printf("collisions: %d\n", ps->collisions);
+	//printf("collisions: %d\n", ps->collisions);
 }
 
 void psys_draw(struct psys* ps)

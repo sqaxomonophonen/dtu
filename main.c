@@ -110,6 +110,7 @@ int main(int argc, char** argv)
 
 		psys_draw(&psys);
 
+		/*
 		struct solid* solid = psys.solids;
 		while(solid) {
 			float nx, ny;
@@ -127,6 +128,7 @@ int main(int argc, char** argv)
 			glEnd();
 			solid = solid->next;
 		}
+		*/
 
 		SDL_GL_SwapWindow(w);
 	}
