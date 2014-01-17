@@ -200,54 +200,44 @@ static void solid_tx_vector_world_to_local(struct solid* solid, float* u, float*
 	tx_vector(solid->tx_u, -solid->tx_v, u, v);
 }
 
-static int solid_bresenham_search_for_escape(struct solid* solid, float x0, float y0, float dx, float dy, float* x1, float* y1)
-{
-	// XXX hmm use ints and *x1 = x0 + x_travelled
+static int solid_find_escape(struct solid* solid, float x0, float y0, float* x1, float* y1) {
+	// search in a spiral until empty spot is found
 
-	if(dx == 0.0f && dy == 0.0f) {
-		*x1 = x0;
-		*y1 = y0;
-		return 0;
-	}
+	int r = 1;
 
-	float e = 0.0f;
-	int n = 0;
-	float x = x0;
-	float y = y0;
-
-	int xward = dx > dy;
-
-	float de = xward ? (dy/dx) : (dx/dy);
-
-	float ax = dx > 0.0f ? 1.0f : -1.0f;
-	float ay = dy > 0.0f ? 1.0f : -1.0f;
+	int cx = x0;
+	int cy = y0;
 
 	for(;;) {
-		int ix = x;
-		int iy = y;
-		uint8_t t = solid_type_at_point(solid, ix, iy);
-		if(t == 0) {
-			*x1 = x;
-			*y1 = y;
-			return n;
-		}
-
-		e += de;
-		if(e >= 0.5f) {
-			if(xward) {
-				y += ay;
-			} else {
-				x += ax;
+		for(int x = (cx-r); x <= (cx+r); x++) {
+			if(solid_type_at_point(solid, x, cy-r) == 0) {
+				(*x1) = x0 + (x-cx);
+				(*y1) = y0 - r;
+				return r;
 			}
-			e -= 1.0f;
 		}
-		if(xward) {
-			x += ax;
-		} else {
-			y += ay;
+		for(int y = (cy-r); y <= (cy+r); y++) {
+			if(solid_type_at_point(solid, cx+r, y) == 0) {
+				(*x1) = x0 + r;
+				(*y1) = y0 + (y-cy);
+				return r;
+			}
 		}
-
-		n++;
+		for(int x = (cx+r); x >= (cx-r); x--) {
+			if(solid_type_at_point(solid, x, cy+r) == 0) {
+				(*x1) = x0 + (x-cx);
+				(*y1) = y0 + r;
+				return r;
+			}
+		}
+		for(int y = (cy+r); y >= (cy-r); y--) {
+			if(solid_type_at_point(solid, cx-r, y) == 0) {
+				(*x1) = x0 - r;
+				(*y1) = y0 + (y-cy);
+				return r;
+			}
+		}
+		r++;
 	}
 }
 
@@ -318,7 +308,7 @@ static int solid_particle_impulse_response(struct solid* solid, struct particle*
 	// estimate impact point _outside_ solid by walking in opposite
 	// direction of impact velocity vector
 	float px, py;
-	solid_bresenham_search_for_escape(solid, lx, ly, -ivx, -ivy, &px, &py);
+	solid_find_escape(solid, lx, ly, &px, &py);
 
 	// sample a surface normal
 	float nx;
@@ -340,7 +330,6 @@ static int solid_particle_impulse_response(struct solid* solid, struct particle*
 
 		// apply torque
 		solid->fvr -= rn * j; // XXX is this right?
-		printf("%f\n", solid->fvr);
 
 		// linear impulse in respect to world...
 		solid_tx_vector_local_to_world(solid, &nx, &ny);
@@ -529,6 +518,7 @@ static void solid_draw(struct solid* solid)
 	glEnd();
 
 	// DEBUG: draw transform
+	/*
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 	glColor4f(1,0,1.0,1.0);
@@ -549,6 +539,7 @@ static void solid_draw(struct solid* solid)
 	glVertex2f(x0 + ax + bx, y0 + ay + by);
 	glVertex2f(x0 + bx, y0 + by);
 	glEnd();
+	*/
 }
 
 
