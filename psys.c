@@ -349,10 +349,8 @@ static int solid_particle_impulse_response(struct solid* solid, struct particle*
 	return 1;
 }
 
-static int solid_solid_impulse_response(struct solid* solid1, struct solid* solid2)
+static void init_rquad_for_solid_on_solid(struct rquad* rq, struct solid* solid1, struct solid* solid2)
 {
-	// TODO "response", not just detection!
-
 	float x0 = solid2->tx_x0;
 	float y0 = solid2->tx_y0;
 	solid_tx_point_world_to_local(solid1, &x0, &y0);
@@ -361,16 +359,22 @@ static int solid_solid_impulse_response(struct solid* solid1, struct solid* soli
 	float v = solid2->tx_v;
 	solid_tx_vector_world_to_local(solid1, &u, &v);
 
-	struct rquad rq;
-	rq.src_width = solid2->b_width;
-	rq.src_height = solid2->b_height;
-	rq.dst_width = solid1->b_width;
-	rq.dst_height = solid1->b_height;
-	rq.x0 = x0;
-	rq.y0 = y0;
-	rq.u = u;
-	rq.v = v;
+	rq->src_width = solid2->b_width;
+	rq->src_height = solid2->b_height;
+	rq->dst_width = solid1->b_width;
+	rq->dst_height = solid1->b_height;
+	rq->x0 = x0;
+	rq->y0 = y0;
+	rq->u = u;
+	rq->v = v;
+}
 
+static int solid_solid_impulse_response(struct solid* solid1, struct solid* solid2)
+{
+	// TODO "response", not just detection!
+
+	struct rquad rq;
+	init_rquad_for_solid_on_solid(&rq, solid1, solid2);
 	if(rquad_init(&rq)) {
 		while(rquad_step(&rq)) {
 			int x = rquad_x(&rq);
