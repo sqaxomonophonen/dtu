@@ -724,6 +724,81 @@ static int test_against_x_y_overflow()
 	return 1;
 }
 
+static int test_against_overdraw()
+{
+	const int rows = 7;
+	const int columns = 12;
+
+	const int DS = 15;
+	const int DN = DS*DS;
+
+	int ok = 0;
+	int overdraw = 0;
+
+	for(int d = -400; d <= 400; d++) {
+		struct rquad rq;
+		rq.dst_width = DS;
+		rq.dst_height = DS;
+		rq.src_width = columns;
+		rq.src_height = rows;
+		float r = (float)d / 180.0f * M_PI;
+		float c = cosf(r);
+		float s = sinf(r);
+		float x0 = (DS-rq.src_width)/2;
+		float y0 = (DS-rq.src_height)/2;
+		rq.x0 = c * (x0 - DS/2) - s * (y0 - DS/2) + DS/2;
+		rq.y0 = s * (x0 - DS/2) + c * (y0 - DS/2) + DS/2;
+		rq.u = c;
+		rq.v = s;
+
+		int buf[DN];
+		bzero(buf, sizeof(buf));
+
+		rquad_init(&rq);
+		while(rquad_step(&rq)) {
+			int x = rquad_x(&rq);
+			int y = rquad_y(&rq);
+			int s = rquad_s(&rq);
+			int t = rquad_t(&rq);
+
+			if(x < 0 || x >= rq.dst_width) {
+				fprintf(stderr, "x out of bounds! (x=%d)\n", x);
+				return 0;
+			}
+			if(y < 0 || y >= rq.dst_height) {
+				fprintf(stderr, "y out of bounds! (y=%d)\n", y);
+				return 0;
+			}
+
+			if(s < 0 || s >= rq.src_width) {
+				fprintf(stderr, "s out of bounds! (s=%d)\n", s);
+				return 0;
+			}
+
+			if(t < 0 || t >= rq.src_height) {
+				fprintf(stderr, "t out of bounds! (t=%d)\n", t);
+				return 0;
+			}
+
+			int dsti = x + y * DS;
+			buf[dsti]++;
+		}
+
+		for(int i = 0; i < DN; i++) {
+			if(buf[i] > 1) {
+				overdraw++;
+			} else {
+				ok++;
+			}
+		}
+	}
+	if(overdraw) {
+		fprintf(stderr, "%d pixels overdrawn, %d ok\n", overdraw, ok);
+		return 0;
+	}
+	return 1;
+}
+
 int main(int argc, char** argv)
 {
 	printf("sizeof(struct rquad) = %zu\n", sizeof(struct rquad));
@@ -734,6 +809,7 @@ int main(int argc, char** argv)
 	T(test_rotation_blit_90);
 	T(test_against_s_t_overflow);
 	T(test_against_x_y_overflow);
+	T(test_against_overdraw);
 
 	return EXIT_SUCCESS;
 }
@@ -760,14 +836,25 @@ static void rotate_a_P()
 		"...##;......" // 5
 		"...##;......" // 6
 		"...##;.....?";// 7
+
+	const char* TEX2 =
+	//	 123456789abc
+		"++++++++++++" // 1
+		"+**********+" // 2
+		"+*========*+" // 3
+		"+*########*+" // 4
+		"+*========*+" // 5
+		"+**********+" // 6
+		"++++++++++++";// 7
 	const int rows = 7;
 	const int columns = 12;
 
 	const int DS = 15;
 	const int DN = DS*DS;
 	char scr[DN];
+	char scr2[DN];
 
-	for(int d = -180; d <= 180; d++) {
+	for(int d = -67; d <= 400; d++) {
 		struct rquad rq;
 		rq.dst_width = DS;
 		rq.dst_height = DS;
@@ -784,6 +871,7 @@ static void rotate_a_P()
 		rq.v = s;
 
 		bzero(scr, DN);
+		bzero(scr2, DN);
 
 		rquad_init(&rq);
 		while(rquad_step(&rq)) {
@@ -814,39 +902,44 @@ static void rotate_a_P()
 			int srci = s + t * columns;
 			int dsti = x + y * DS;
 			scr[dsti] = TEX[srci];
+			scr2[dsti] = TEX2[srci];
 		}
 
-		printf("\033[2J\033[H");
+		//printf("\033[2J\033[H");
 
-		printf("+");
-		for(int i = 0; i < DS; i++) {
-			printf("-");
-		}
-		printf("+\n");
-
-		for(int y = 0; y < DS; y++) {
-			printf("|");
-			for(int x = 0; x < DS; x++) {
-				char p = scr[x + y * DS];
-				if(p == 0) {
-					printf(" ");
-				} else {
-					printf("%c", p);
-				}
+		for(int i = 0; i < 2; i++) {
+			char* buf;
+			if(i == 0) buf = scr; else buf = scr2;
+			printf("+");
+			for(int i = 0; i < DS; i++) {
+				printf("-");
 			}
-			printf("|\n");
-		}
+			printf("+\n");
 
-		printf("+");
-		for(int i = 0; i < DS; i++) {
-			printf("-");
+			for(int y = 0; y < DS; y++) {
+				printf("|");
+				for(int x = 0; x < DS; x++) {
+					char p = buf[x + y * DS];
+					if(p == 0) {
+						printf(" ");
+					} else {
+						printf("%c", p);
+					}
+				}
+				printf("|\n");
+			}
+
+			printf("+");
+			for(int i = 0; i < DS; i++) {
+				printf("-");
+			}
+			printf("+\n\n");
 		}
-		printf("+\n");
 		printf("%d degrees\n", d);
 
 		struct timeval tv;
 		tv.tv_sec = 0;
-		tv.tv_usec = 1000000/30;
+		tv.tv_usec = 1000000/40;
 		select(0, NULL, NULL, NULL, &tv);
 	}
 }
