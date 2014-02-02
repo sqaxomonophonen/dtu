@@ -105,9 +105,6 @@ int main(int argc, char** argv)
 			psys_step(&psys);
 		}
 
-		glClearColor(0, 0.05, 0.1, 1);
-		glClear(GL_COLOR_BUFFER_BIT);
-
 		psys_draw(&psys);
 
 		/*

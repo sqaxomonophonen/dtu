@@ -5,7 +5,7 @@ PKGS = sdl2 gl glew libpng
 CFLAGS = -m64 -O3 -Wall $(shell pkg-config $(PKGS) --cflags)
 LINK_SDL = $(shell pkg-config $(PKGS) --libs)
 LINK = $(LINK_SDL) -lm
-OBJS = main.o psys.o mud.o log.o a.o
+OBJS = main.o psys.o rquad.o mud.o log.o a.o
 
 all: main
 
@@ -15,8 +15,11 @@ main.o: main.c psys.h
 a.o: a.c a.h
 	$(CC) $(CFLAGS) -c a.c
 
-psys.o: psys.c psys.h mud.h
+psys.o: psys.c psys.h mud.h rquad.h
 	$(CC) $(CFLAGS) -c psys.c
+
+rquad.o: rquad.c rquad.h a.h
+	$(CC) $(CFLAGS) -c rquad.c
 
 mud.o: mud.c mud.h log.h
 	$(CC) $(CFLAGS) -c mud.c

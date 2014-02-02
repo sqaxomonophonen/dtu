@@ -7,6 +7,7 @@
 #include <glew.h>
 
 #include "psys.h"
+#include "rquad.h"
 #include "mud.h"
 
 #define DEG2RAD(x) ((x) * (1.0 / 180.0 * M_PI))
@@ -346,6 +347,43 @@ static int solid_particle_impulse_response(struct solid* solid, struct particle*
 	particle->py = py;
 
 	return 1;
+}
+
+static int solid_solid_impulse_response(struct solid* solid1, struct solid* solid2)
+{
+	// TODO "response", not just detection!
+
+	float x0 = solid2->tx_x0;
+	float y0 = solid2->tx_y0;
+	solid_tx_point_world_to_local(solid1, &x0, &y0);
+
+	float u = solid2->tx_u;
+	float v = solid2->tx_v;
+	solid_tx_vector_world_to_local(solid1, &u, &v);
+
+	struct rquad rq;
+	rq.src_width = solid2->b_width;
+	rq.src_height = solid2->b_height;
+	rq.dst_width = solid1->b_width;
+	rq.dst_height = solid1->b_height;
+	rq.x0 = x0;
+	rq.y0 = y0;
+	rq.u = u;
+	rq.v = v;
+
+	if(rquad_init(&rq)) {
+		while(rquad_step(&rq)) {
+			int x = rquad_x(&rq);
+			int y = rquad_y(&rq);
+			int s = rquad_s(&rq);
+			int t = rquad_t(&rq);
+			if(solid_type_at_point(solid1, x, y) && solid_type_at_point(solid2, s, t)) {
+				return 1;
+			}
+		}
+	}
+
+	return 0;
 }
 
 
@@ -698,6 +736,10 @@ void psys_init(struct psys* ps)
 	//qsort(ps->occupied_buckets, ps->occupied_buckets_count, sizeof(int), occupied_buckets_index_compare);
 
 	ps->solids = solid_load("thing.png");
+	ps->solids->next = solid_load("lump.png");
+	ps->solids->next->py = -600;
+	ps->solids->next->px += 70;
+	ps->solids->next->vr *= -1;
 }
 
 
@@ -830,11 +872,29 @@ void psys_step(struct psys* ps)
 		solid = solid->next;
 	}
 
+	ps->XXX_solid_collision = 0;
+	solid = ps->solids;
+	while(solid) {
+		struct solid* other = solid->next;
+		while(other) {
+			ps->XXX_solid_collision |= solid_solid_impulse_response(solid, other);
+			other = other->next;
+		}
+		solid = solid->next;
+	}
+
 	//printf("collisions: %d\n", ps->collisions);
 }
 
 void psys_draw(struct psys* ps)
 {
+	if(ps->XXX_solid_collision) {
+		glClearColor(1, 0.05, 0.1, 1);
+	} else {
+		glClearColor(0, 0.05, 0.1, 1);
+	}
+	glClear(GL_COLOR_BUFFER_BIT);
+
 	glColor4f(1,1,1,1);
 	glDisable(GL_TEXTURE_2D);
 	glMatrixMode(GL_MODELVIEW);
