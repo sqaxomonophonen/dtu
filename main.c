@@ -92,6 +92,9 @@ int main(int argc, char** argv)
 				if(e.key.keysym.sym == SDLK_SPACE) {
 					simulation_running ^= 1;
 				}
+				if(e.key.keysym.sym == SDLK_PERIOD) {
+					simulation_running = 2;
+				}
 			}
 			if(e.type == SDL_MOUSEMOTION) {
 				wmx = e.motion.x - width/2;
@@ -103,6 +106,9 @@ int main(int argc, char** argv)
 
 		if(simulation_running) {
 			psys_step(&psys);
+			if(simulation_running > 1) {
+				simulation_running = 0;
+			}
 		}
 
 		psys_draw(&psys);
