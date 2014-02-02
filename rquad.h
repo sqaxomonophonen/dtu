@@ -175,13 +175,13 @@ static inline int rquad_step(struct rquad* rq)
 	}
 
 	do_subtri:
-	while(rqi->sub_triangles_left) {
+	if(rqi->sub_triangles_left) {
 		_rquad_setup_sub_triangle(rq);
 		rqi->sub_triangles_left--;
 		goto do_row;
 	}
 
-	while(rqi->triangles_left) {
+	if(rqi->triangles_left) {
 		_rquad_setup_triangle(rq);
 		rqi->triangles_left--;
 		goto do_subtri;

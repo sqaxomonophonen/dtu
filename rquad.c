@@ -626,6 +626,8 @@ static void dump_rq(struct rquad* rq)
 
 static int test_against_s_t_overflow()
 {
+	// XXX this is currently kind of a non-test since s/t are being clamped :-/
+
 	const int S = 103;
 
 	int ok = 0;
@@ -849,7 +851,7 @@ static void rotate_a_P()
 	const int rows = 7;
 	const int columns = 12;
 
-	const int DS = 15;
+	const int DS = 10;
 	const int DN = DS*DS;
 	char scr[DN];
 	char scr2[DN];
