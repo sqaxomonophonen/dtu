@@ -354,7 +354,7 @@ void _rquad_setup_sub_triangle(struct rquad* rq)
 		int fdx_outer = _rquad_fixed_floor(rqi->fdx_left_edge - _RQUAD_FIXED_EPSILON);
 		rqi->fd_error = fdx_outer - rqi->fdx_left_edge + _RQUAD_FIXED_ONE;
 		int idx_outer = _rquad_fixed_to_int(fdx_outer);
-		float dx_outer = idx_outer;
+		float dx_outer = (float) idx_outer;
 		rqi->y = _rquad_fixed_to_int(fsy);
 
 		float s0 = v_lower->u * rq->src_width;
