@@ -432,10 +432,9 @@ static void init_rquad_for_solid_on_solid(struct rquad* rq, struct solid* solid1
 	rq->v = v;
 }
 
-static int solid_solid_impulse_response(struct solid* solid1, struct solid* solid2)
-{
-	// TODO "response", not just detection!
 
+static int solid_solid_intersection(struct solid* solid1, struct solid* solid2, float* nx, float* ny)
+{
 	struct rquad rq;
 	init_rquad_for_solid_on_solid(&rq, solid1, solid2);
 	if(rquad_init(&rq)) {
@@ -445,13 +444,72 @@ static int solid_solid_impulse_response(struct solid* solid1, struct solid* soli
 			int s = rquad_s(&rq);
 			int t = rquad_t(&rq);
 			if(solid_type_at_point(solid1, x, y) && solid_type_at_point(solid2, s, t)) {
-				return 1;
+				float nx1, ny1;
+				if(solid_normal_at_local_point(solid1, x, y, &nx1, &ny1)) {
+					float nx2, ny2;
+					if(solid_normal_at_local_point(solid2, s, t, &nx2, &ny2)) {
+						solid_tx_vector_local_to_world(solid1, &nx1, &ny1);
+						solid_tx_vector_local_to_world(solid2, &nx2, &ny2);
+						(*nx) += (nx1 - nx2);
+						(*ny) += (ny1 - ny2);
+					}
+				}
 			}
 		}
 	}
-
-	return 0;
+	return (*nx != 0) || (*ny != 0);
 }
+
+static void solid_solid_impulse_response(struct solid* solid1, struct solid* solid2)
+{
+	if(!aabb_intersects(&solid1->aabb, &solid2->aabb)) return;
+
+	float nx=0, ny=0;
+	int collision = solid_solid_intersection(solid1, solid2, &nx, &ny);
+	if(!collision) return;
+
+	// ok, collision!
+
+	// impact velocity (FIXME angular?)
+	//float ivx = solid1->vx - solid2->vx;
+	//float ivy = solid1->vy - solid2->vy;
+	float ivx = solid2->vx - solid1->vx;
+	float ivy = solid2->vy - solid1->vy;
+
+	float vn = dot2d(ivx, ivy, nx, ny);
+
+	//printf("DEBUG found_normal = %d at (%d,%d) / vn = %f\n", found_normal, (int)px, (int)py, vn);
+
+	// if a normal was found and impact velocity vector point towards the
+	// surface, then we have a "valid impact" and can calculate impulse
+	if(vn < 0) {
+		float nn = nx*nx + ny*ny;
+		float m1 = solid1->inv_m + solid2->inv_m;
+		// XXX dx/dy?
+		/*
+		float rn1 = dot2d(-dy, dx, nx, ny);
+		float rnI1 = rn1 * rn1 * solid1->inv_I;
+		float rn2 = dot2d(-dy, dx, -nx, -ny);
+		float rnI2 = rn2 * rn2 * solid2->inv_I;
+		float j = (-2.0f*vn) / (nn * m1 + rnI1 + rnI2);
+		*/
+		const float E = 0.1f;
+		float j = (-(1.0f + E)*vn) / (nn * m1);
+
+		// apply torque
+		//solid->fvr -= rn * j; // XXX is this right?
+
+		// linear impulse in respect to world...
+		//solid_tx_vector_local_to_world(solid, &nx, &ny);
+
+		// apply force
+		solid1->fx -= nx * j;
+		solid1->fy -= ny * j;
+		solid2->fx += nx * j;
+		solid2->fy += ny * j;
+	}
+}
+
 
 
 static void solid_update_dirty(struct solid* solid)
@@ -582,15 +640,19 @@ void solid_destroy(struct solid* solid)
 
 static void solid_step(struct solid* solid)
 {
+	// linear
 	solid->vx += solid->fx * solid->inv_m;
 	solid->vy += solid->fy * solid->inv_m;
-	solid->fx = 0.0f;
-	solid->fy = 0.0f;
 	solid->px += solid->vx;
 	solid->py += solid->vy;
 
+	// angular
 	solid->vr += solid->fvr * solid->inv_I;
 	solid->r += solid->vr;
+
+	// reset force accumulators
+	solid->fx = 0.0f;
+	solid->fy = 0.0f;
 	solid->fvr = 0.0f;
 
 	solid_update_transform(solid);
@@ -600,8 +662,42 @@ static void solid_step(struct solid* solid)
 }
 
 
+static inline void solid_debug_draw(struct solid* solid)
+{
+	// DEBUG: draw transform
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glColor4f(1,0,1,1);
+	glDisable(GL_TEXTURE_2D);
+
+	float x0 = solid->tx_x0;
+	float y0 = solid->tx_y0;
+
+	float ax = solid->tx_u * solid->b_width;
+	float ay = solid->tx_v * solid->b_width;
+
+	float bx = -solid->tx_v * solid->b_height;
+	float by = solid->tx_u * solid->b_height;
+
+	glBegin(GL_LINE_LOOP);
+	glVertex2f(x0, y0);
+	glVertex2f(x0 + ax, y0 + ay);
+	glVertex2f(x0 + ax + bx, y0 + ay + by);
+	glVertex2f(x0 + bx, y0 + by);
+	glEnd();
+
+
+	// DEBUG: draw aabb
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glColor4f(0,1,0,1);
+	glDisable(GL_TEXTURE_2D);
+	aabb_draw(&solid->aabb);
+}
+
 static void solid_draw(struct solid* solid)
 {
+	glEnable(GL_TEXTURE_2D);
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 
@@ -621,33 +717,7 @@ static void solid_draw(struct solid* solid)
 	glTexCoord2f(0, 1);
 	glVertex2f(0, solid->b_height);
 	glEnd();
-
-	// DEBUG: draw transform
-	/*
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
-	glColor4f(1,0,1.0,1.0);
-	glDisable(GL_TEXTURE_2D);
-
-	float x0 = solid->tx_x0;
-	float y0 = solid->tx_y0;
-
-	float ax = solid->tx_u * solid->b_width;
-	float ay = solid->tx_v * solid->b_width;
-
-	float bx = -solid->tx_v * solid->b_height;
-	float by = solid->tx_u * solid->b_height;
-
-	glBegin(GL_LINE_LOOP);
-	glVertex2f(x0, y0);
-	glVertex2f(x0 + ax, y0 + ay);
-	glVertex2f(x0 + ax + bx, y0 + ay + by);
-	glVertex2f(x0 + bx, y0 + by);
-	glEnd();
-	*/
 }
-
-
 
 
 static float frand(float min, float max)
@@ -939,12 +1009,14 @@ void psys_step(struct psys* ps)
 		solid = solid->next;
 	}
 
-	ps->XXX_solid_collision = 0;
+
+	// TODO find islands?
+
 	solid = ps->solids;
 	while(solid) {
 		struct solid* other = solid->next;
 		while(other) {
-			ps->XXX_solid_collision |= solid_solid_impulse_response(solid, other);
+			solid_solid_impulse_response(solid, other);
 			other = other->next;
 		}
 		solid = solid->next;
@@ -955,12 +1027,9 @@ void psys_step(struct psys* ps)
 
 void psys_draw(struct psys* ps)
 {
-	if(ps->XXX_solid_collision) {
-		glClearColor(1, 0.05, 0.1, 1);
-	} else {
-		glClearColor(0, 0.05, 0.1, 1);
-	}
+	glClearColor(0, 0.05, 0.1, 1);
 	glClear(GL_COLOR_BUFFER_BIT);
+
 
 	glColor4f(1,1,1,1);
 	glDisable(GL_TEXTURE_2D);
@@ -975,7 +1044,6 @@ void psys_draw(struct psys* ps)
 	}
 	glEnd();
 
-	glEnable(GL_TEXTURE_2D);
 	struct solid* solid = ps->solids;
 	while(solid) {
 		solid_draw(solid);

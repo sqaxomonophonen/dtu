@@ -109,8 +109,6 @@ struct psys {
 	struct ppair* ppairs;
 
 	struct solid* solids;
-
-	int XXX_solid_collision;
 };
 
 void psys_init(struct psys* ps);
