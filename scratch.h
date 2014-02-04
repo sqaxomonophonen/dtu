@@ -9,11 +9,6 @@ struct scratch {
 	void* ptr;
 };
 
-struct scratch_lap {
-	struct scratch* scratch;
-	size_t top;
-};
-
 
 #define SCRATCH_MIN_CAPACITY (1<<20)
 
