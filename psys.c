@@ -27,6 +27,51 @@
 
 
 
+
+
+static void aabb_init(struct aabb* aabb, float x, float y)
+{
+	aabb->x0 = aabb->x1 = x;
+	aabb->y0 = aabb->y1 = y;
+}
+
+static void aabb_update(struct aabb* aabb, float x, float y)
+{
+	if(x < aabb->x0) aabb->x0 = x;
+	if(x > aabb->x1) aabb->x1 = x;
+	if(y < aabb->y0) aabb->y0 = y;
+	if(y > aabb->y1) aabb->y1 = y;
+}
+
+static inline void aabb_draw(struct aabb* aabb)
+{
+	glBegin(GL_LINE_LOOP);
+	glVertex2f(aabb->x0, aabb->y0);
+	glVertex2f(aabb->x1, aabb->y0);
+	glVertex2f(aabb->x1, aabb->y1);
+	glVertex2f(aabb->x0, aabb->y1);
+	glEnd();
+}
+
+static int aabb_point_inside(struct aabb* a, float x, float y)
+{
+	if(x < a->x0 || x > a->x1 || y < a->y0 || y > a->y1) {
+		return 0;
+	} else {
+		return 1;
+	}
+}
+
+static int aabb_intersects(struct aabb* a, struct aabb* b)
+{
+	if(b->x1 < a->x0 || b->x0 > a->x1 || b->y1 < a->y0 || b->y0 > a->y1) {
+		return 0;
+	} else {
+		return 1;
+	}
+}
+
+
 static float dot2d(float ax, float ay, float bx, float by)
 {
 	return ax*bx + ay*by;
@@ -59,6 +104,23 @@ static float solid_mass_at_point(struct solid* solid, int x, int y)
 	}
 }
 
+static void solid_update_aabb(struct solid* solid)
+{
+	float x0 = solid->tx_x0;
+	float y0 = solid->tx_y0;
+
+	float wx = solid->tx_u * solid->b_width;
+	float wy = solid->tx_v * solid->b_width;
+
+	float hx = -solid->tx_v * solid->b_height;
+	float hy = solid->tx_u * solid->b_height;
+
+	aabb_init(&solid->aabb, x0, y0);
+	aabb_update(&solid->aabb, x0 + wx, y0 + wy);
+	aabb_update(&solid->aabb, x0 + hx, y0 + hy);
+	aabb_update(&solid->aabb, x0 + wx + hx, y0 + wy + hy);
+}
+
 static void solid_update_transform(struct solid* solid)
 {
 	float s = sinf(DEG2RAD(solid->r));
@@ -75,7 +137,7 @@ static void solid_update_transform(struct solid* solid)
 	solid->tx_u = c;
 	solid->tx_v = s;
 
-	// TODO update AABB?
+	solid_update_aabb(solid);
 }
 
 
@@ -259,10 +321,11 @@ static void solid_tx_point_local_to_world(struct solid* solid, float* x, float* 
 
 static int solid_particle_impulse_response(struct solid* solid, struct particle* particle)
 {
-	// TODO AABB test
-
 	float lx = particle->px;
 	float ly = particle->py;
+
+	if(!aabb_point_inside(&solid->aabb, lx, ly)) return 0;
+
 	solid_tx_point_world_to_local(solid, &lx, &ly);
 	int lxi = (int)lx;
 	int lyi = (int)ly;
