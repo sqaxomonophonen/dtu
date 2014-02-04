@@ -848,13 +848,13 @@ void psys_init(struct psys* ps)
 {
 	bzero(ps, sizeof(struct psys));
 
+	scratch_init(&ps->scratch);
+
 	int N = 15000;
 
 	ps->bucket_count_shift = pot(N) + 5; // x32 space per particle - ish
-	ps->occupied_buckets_max = N * 2;
-	ps->occupied_buckets = malloc(ps->occupied_buckets_max * sizeof(int));
 
-	ps->ppairs = malloc(50 * N * sizeof(struct ppair)); // XXX wishful thinking
+	ps->occupied_buckets = malloc(N * sizeof(int));
 
 	psys_reset_hash(ps);
 
@@ -885,7 +885,9 @@ void psys_step(struct psys* ps)
 	struct particle_hash* ph = &ps->hashes[ps->current_hash_index];
 	int n = ps->occupied_buckets_count;
 
-	ps->ppair_count = 0;
+	scratch_reset(&ps->scratch);
+	size_t ppair_lap = scratch_align(&ps->scratch, sizeof(struct ppair));
+	int ppair_count = 0;
 
 	// neighbour detection and density
 	uint32_t d_idx = 0;
@@ -913,7 +915,9 @@ void psys_step(struct psys* ps)
 							op->density += d * PARTICLE_MASS;
 
 							// add particle pair
-							struct ppair* ppair = &ps->ppairs[ps->ppair_count++];
+							struct ppair* ppair = scratch_alloc(&ps->scratch, sizeof(struct ppair));
+							ppair_count++;
+
 							ppair->i = s_idx;
 							ppair->j = d_idx;
 						}
@@ -924,11 +928,10 @@ void psys_step(struct psys* ps)
 		}
 	}
 
-	//printf("ppair_count: %d\n", ps->ppair_count);
-
 	// calculate forces
-	for(int i = 0; i < ps->ppair_count; i++) {
-		struct ppair* ppair = &ps->ppairs[i];
+	struct ppair* ppairs = scratch_get(&ps->scratch, ppair_lap);
+	for(int i = 0; i < ppair_count; i++) {
+		struct ppair* ppair = &ppairs[i];
 		struct particle* particle_i = &ph->buckets[ppair->i].particle;
 		struct particle* particle_j = &ph->buckets[ppair->j].particle;
 		float dx = particle_i->px - particle_j->px;

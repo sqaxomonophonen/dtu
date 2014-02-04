@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "scratch.h"
+
 struct aabb {
 	float x0, y0;
 	float x1, y1;
@@ -100,15 +102,13 @@ struct psys {
 	int bucket_count_shift;
 
 	int* occupied_buckets;
-	int occupied_buckets_max;
 	int occupied_buckets_count;
 
 	int collisions;
 
-	int ppair_count;
-	struct ppair* ppairs;
-
 	struct solid* solids;
+
+	struct scratch scratch;
 };
 
 void psys_init(struct psys* ps);

@@ -15,7 +15,7 @@ main.o: main.c psys.h
 a.o: a.c a.h
 	$(CC) $(CFLAGS) -c a.c
 
-psys.o: psys.c psys.h mud.h rquad.h
+psys.o: psys.c psys.h mud.h rquad.h scratch.h
 	$(CC) $(CFLAGS) -c psys.c
 
 rquad.o: rquad.c rquad.h a.h
