@@ -26,9 +26,6 @@ void panic(const char* msg)
 int main(int argc, char** argv)
 {
 
-	//printf("sizeof(struct particle_hash_bucket) = %zu\n", sizeof(struct particle_hash_bucket));
-	//return 0;
-
 	SDL_Init(SDL_INIT_VIDEO);
 
 	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
@@ -42,7 +39,7 @@ int main(int argc, char** argv)
 		SDL_WINDOWPOS_UNDEFINED,
 		SDL_WINDOWPOS_UNDEFINED,
 		0, 0,
-		SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_OPENGL);
+		SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
 
 	if(w == NULL) {
 		sdl_panic("SDL_CreateWindow");
@@ -57,13 +54,6 @@ int main(int argc, char** argv)
 		panic((const char*)glewGetErrorString(err));
 	}
 
-	int width, height;
-	SDL_GetWindowSize(w, &width, &height);
-	glViewport(0, 0, width, height);
-	printf("window: %dx%d\n", width, height);
-
-	glMatrixMode(GL_PROJECTION);
-	glOrtho(-width/2, width/2, height/2, -height/2, 1, 0);
 	glDisable(GL_DEPTH_TEST);
 	glShadeModel(GL_SMOOTH);
 	glEnable(GL_BLEND);
@@ -74,9 +64,6 @@ int main(int argc, char** argv)
 	psys_init(&psys);
 
 	int exiting = 0;
-
-	float wmx = 0;
-	float wmy = 0;
 
 	psys_step(&psys); // kickstart
 
@@ -96,10 +83,6 @@ int main(int argc, char** argv)
 					simulation_running = 2;
 				}
 			}
-			if(e.type == SDL_MOUSEMOTION) {
-				wmx = e.motion.x - width/2;
-				wmy = e.motion.y - height/2;
-			}
 		}
 
 		if(exiting) break;
@@ -111,27 +94,14 @@ int main(int argc, char** argv)
 			}
 		}
 
-		psys_draw(&psys);
+		int width, height;
+		SDL_GetWindowSize(w, &width, &height);
+		glViewport(0, 0, width, height);
+		glMatrixMode(GL_PROJECTION);
+		glLoadIdentity();
+		glOrtho(-width/2, width/2, height/2, -height/2, 1, 0);
 
-		/*
-		struct solid* solid = psys.solids;
-		while(solid) {
-			float nx, ny;
-			if(solid_normal_at_world_point(solid, wmx, wmy, &nx, &ny)) {
-				glColor4f(1,1,0,1);
-			} else {
-				glColor4f(1,0,0,1);
-			}
-			glDisable(GL_TEXTURE_2D);
-			glMatrixMode(GL_MODELVIEW);
-			glLoadIdentity();
-			glBegin(GL_LINES);
-			glVertex2f(wmx, wmy);
-			glVertex2f(wmx + nx * 150, wmy + ny * 150);
-			glEnd();
-			solid = solid->next;
-		}
-		*/
+		psys_draw(&psys);
 
 		SDL_GL_SwapWindow(w);
 	}
